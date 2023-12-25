@@ -10,16 +10,16 @@
 #define Nh 4
 #define Nv 4
 #define N Nh * Nv
-#define L 16
+#define L 32
 #define M N
-#define T 100000
-#define W_START_WIDTH 0.5
+#define T 1000
+#define W_START_WIDTH 0.2
 #define ETTA 0.01
-#define EPOCH_COUNT 2000
+#define EPOCH_COUNT 400
 #define PROGRESS_BAR_EL_COUNT 50
 #define MAX_ERROR 0
-#define MAX_PIX_ERROR 2
-#define MAX_ERORR_DELTA 1e-8
+#define MAX_PIX_ERROR 6
+#define MAX_ERORR_DELTA 1e-16
 
 png_structp png_read_ptr;
 png_infop info_read_ptr;
@@ -70,13 +70,14 @@ void trainOnSegmet(int h_seg, int v_seg) {
     int t = 0;
     int goodTryCount = 0;
     int delatMoreThanEps = 1;
+    
 
     // copy data from png to X vector
     for (int h = 0; h < Nh; h++)
         for (int v = 0; v < Nv; v++)
             input[Nv * h + v] = row_pointers[Nv * v_seg + v][Nh * h_seg + h];
 
-    while (t < T && delatMoreThanEps) { // add delta < e
+    while (t < T && delatMoreThanEps) {
         t++;
         // cal Y and G
         for (int l = 0; l < L; l++) {
@@ -93,7 +94,6 @@ void trainOnSegmet(int h_seg, int v_seg) {
             }
             Y[i] = y_i;
         }
-        // end calc Y and G
         // dW_2(il)
         for (int i = 0; i < M; i++) {
             for (int l = 0; l < L; l++) {
@@ -126,29 +126,25 @@ void trainOnSegmet(int h_seg, int v_seg) {
             }
             Y_new[i] = y_i;
         }
-        // end clac new Y and G
         // calc oldE
-        float oldE = 0;
+        double oldE = 0;
         for (int i = 0; i < N; i++) {
-            float delta = Y[i] - input[i];
+            double delta = Y[i] - input[i];
             oldE += delta * delta;
         }
-        // oldE /= 2;
-        // end calc oldE
         // calc newE
-        float newE = 0;
+        double newE = 0;
         for (int i = 0; i < N; i++) {
-            float delta = Y_new[i] - input[i];
+            double delta = Y_new[i] - input[i];
             newE += delta * delta;
         }
         // newE /= 2;
         // end calc newE
-        float deltaE = oldE - newE;
+        double deltaE = oldE - newE;
         if (deltaE < 0) {
-            etta /= 2.; // TODO constant
+            etta /= 2.; 
             goodTryCount = 0;
         } else {
-            // etta = etta * 2;
             goodTryCount++;
             // swap
             float ** tmpPtr_1 = W_1;
@@ -157,12 +153,11 @@ void trainOnSegmet(int h_seg, int v_seg) {
             W_2 = W_2_new;
             W_1_new = tmpPtr_1;
             W_2_new = tmpPtr_2;
-            // end swap
-            if (deltaE < MAX_ERORR_DELTA) // TODO constant
-                // printf("%lf\n", deltaE);
+            if (deltaE < MAX_ERORR_DELTA ) 
+            //    printf("%lf\n", deltaE);
                 delatMoreThanEps = 0;
-            if (goodTryCount == 2) { // TODO constant
-                etta *= 2.;
+            if ( (goodTryCount == 2 &&  L >= Nh * Nv)  || goodTryCount == 2 ) { 
+                etta *= 2;
                 goodTryCount = 0;
             }
         }
@@ -192,6 +187,16 @@ void useNNetOnSegmet(int h_seg, int v_seg, int mode) {
         for (int l = 0; l < L; l++) {
             y_i += W_2[i][l] * Gval[l];
         }
+        if (y_i < 0)
+        {
+            y_i = 0;
+        }
+        if (y_i > 255)
+        {
+            y_i = 255;
+        }
+        
+        
         Y[i] = y_i;
     }
 
@@ -321,10 +326,9 @@ int main(int argc, char * argv[]) {
     int epoch = 1;
     while( (E > MAX_ERROR) && (epoch < EPOCH_COUNT) && (med_error_per_pixel > MAX_PIX_ERROR)){
         epoch ++;
-    // for (int epoch = 1; epoch <= EPOCH_COUNT; epoch++) {
-        for (int h_seg = 0; h_seg < h_segCount; h_seg++) {
-            for (int v_seg = 0; v_seg < v_segCount; v_seg++) {
-                trainOnSegmet(h_seg, v_seg);
+        for (int h_seg = 1; h_seg < h_segCount; h_seg++) {
+            for (int v_seg = 1; v_seg < v_segCount; v_seg++) {
+                    trainOnSegmet(h_seg, v_seg);
             }
         }
         // find new Error
@@ -337,14 +341,13 @@ int main(int argc, char * argv[]) {
             min_med_error = med_error_per_pixel;
 
         // print progress bar
-        // TODO: delete progress bar
         int progress = 100 * epoch / EPOCH_COUNT;
         int pLine = progress * PROGRESS_BAR_EL_COUNT / 100;
         int pc = 0;
         char esc[4];
         esc[0] = 27;
         esc[1] = '[';
-        esc[2] = 'A'; // esc[3] = 'K';
+        esc[2] = 'A';
         write(1, esc, 3);
         while (pc < PROGRESS_BAR_EL_COUNT) {
             if (pc < pLine)
@@ -360,7 +363,7 @@ int main(int argc, char * argv[]) {
     printf("\nW_2\n");
     printW(W_2, M, L);
 
-    // decompressing
+    // getting result image
     for (int h_seg = 0; h_seg < h_segCount; h_seg++) {
         for (int v_seg = 0; v_seg < v_segCount; v_seg++) {
             useNNetOnSegmet(h_seg, v_seg, 0);
